@@ -13,8 +13,20 @@
 namespace litehtml
 {
 
-static std::map<string, string_id> map;
-static std::vector<string> array;
+// Using function-local statics (Meyer's singleton) avoids double-free at exit:
+// file-scope statics in static libraries can be initialized/destroyed multiple
+// times when the translation unit is linked into more than one DSO, or when
+// LTO merges COMDATs unexpectedly.  Function-local statics are guaranteed to
+// be initialized exactly once (C++11 §6.7) and destroyed in reverse order of
+// construction at program exit — after all TU-scope statics.
+static std::map<string, string_id>& get_map() {
+    static std::map<string, string_id> map;
+    return map;
+}
+static std::vector<string>& get_array() {
+    static std::vector<string> array;
+    return array;
+}
 
 static int init()
 {
@@ -38,6 +50,8 @@ const string_id star_id = _id("*");
 string_id _id(const string& str)
 {
 	lock_guard;
+	auto& map = get_map();
+	auto& array = get_array();
 	auto it = map.find(str);
 	if (it != map.end()) return it->second;
 	// else: str not found, add it to the array and the map
@@ -48,7 +62,7 @@ string_id _id(const string& str)
 const string& _s(string_id id)
 {
 	lock_guard;
-	return array[id];
+	return get_array()[id];
 }
 
 } // namespace litehtml
