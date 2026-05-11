@@ -70,7 +70,7 @@ string_id _id(const string& str)
 	auto& array = get_array();
 	auto it = map.find(str);
 	if (it != map.end()) return it->second;
-	// else: str not found, add it to the array and the map
+	// New string — intern it globally.
 	array.push_back(str);
 	return map[str] = (string_id)(array.size() - 1);
 }

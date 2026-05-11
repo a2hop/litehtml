@@ -79,7 +79,7 @@ namespace litehtml
 
 		struct css_properties_hash {
 			size_t operator()(const std::shared_ptr<css_properties>& p) const {
-				return p->get_display() ^ p->get_position() ^ (int)p->get_float() ^ p->get_font();
+				return (size_t)p->get_display() ^ (size_t)p->get_position() ^ (size_t)p->get_float() ^ p->get_font();
 			}
 		};
 		struct css_properties_eq {

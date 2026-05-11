@@ -82,14 +82,20 @@ document::css_lru document::s_doc_css_lru;
 	document::ptr document::createFromString(const estring& str, document_container* container,
 											 const string& master_styles, const string& user_styles)
 	{
+		// Performance instrumentation — uncomment to re-enable:
+		// #define LITEHTML_PERF
+#ifdef LITEHTML_PERF
 		using clock = std::chrono::steady_clock;
 		auto t_start = clock::now();
+#endif
 
 		// Create litehtml::document
 		document::ptr doc	= make_shared<document>(container);
 
 		// Parse document into GumboOutput
+#ifdef LITEHTML_PERF
 		auto t0 = clock::now();
+#endif
 		GumboOutput* output = doc->parse_html(str);
 
 		// mode must be set before doc->create_node because it is used in html_tag::set_attr
@@ -105,7 +111,9 @@ document::css_lru document::s_doc_css_lru;
 			doc->m_mode = limited_quirks_mode;
 			break;
 		}
+#ifdef LITEHTML_PERF
 		auto t1 = clock::now();
+#endif
 
 		// Create litehtml::elements.
 		elements_list root_elements;
@@ -117,7 +125,9 @@ document::css_lru document::s_doc_css_lru;
 
 		// Destroy GumboOutput
 		gumbo_destroy_output(&kGumboDefaultOptions, output);
+#ifdef LITEHTML_PERF
 		auto t2 = clock::now();
+#endif
 
 		if(master_styles != "")
 		{
@@ -132,7 +142,9 @@ document::css_lru document::s_doc_css_lru;
 				s_master_css_lru.put(h, doc->m_master_css);
 			}
 		}
+#ifdef LITEHTML_PERF
 		auto t3 = clock::now();
+#endif
 
 		if(user_styles != "")
 		{
@@ -149,11 +161,15 @@ document::css_lru document::s_doc_css_lru;
 
 			// apply master CSS
 			doc->m_root->apply_stylesheet(doc->m_master_css);
-			auto t_ms1 = clock::now();
+	#ifdef LITEHTML_PERF
+		auto t_ms1 = clock::now();
+#endif
 
 			// parse elements attributes
 			doc->m_root->parse_attributes();
-			auto t_pa = clock::now();
+	#ifdef LITEHTML_PERF
+		auto t_pa = clock::now();
+#endif
 
 			// Parse style sheets linked in document (from <style> tags).
 			// Hash all CSS text blocks to look up the LRU cache first.
@@ -210,22 +226,30 @@ document::css_lru document::s_doc_css_lru;
 					}
 				}
 			}
-			auto t_dp = clock::now();
+	#ifdef LITEHTML_PERF
+		auto t_dp = clock::now();
+#endif
 
 			// Apply media features.
 			doc->update_media_lists(doc->m_media);
 
 			// Apply parsed styles.
 			doc->m_root->apply_stylesheet(doc->m_styles);
-			auto t_ds = clock::now();
+	#ifdef LITEHTML_PERF
+		auto t_ds = clock::now();
+#endif
 
 			// Apply user styles if any
 			doc->m_root->apply_stylesheet(doc->m_user_css);
-			auto t_us = clock::now();
+	#ifdef LITEHTML_PERF
+		auto t_us = clock::now();
+#endif
 
 			// Initialize element::m_css
 			doc->m_root->compute_styles();
-			auto t_cs = clock::now();
+	#ifdef LITEHTML_PERF
+		auto t_cs = clock::now();
+#endif
 
 			// Create rendering tree
 			doc->m_root_render = doc->m_root->create_render_item(nullptr);
@@ -241,8 +265,11 @@ document::css_lru document::s_doc_css_lru;
 			{
 				doc->m_root_render = doc->m_root_render->init();
 			}
-			auto t_ri = clock::now();
+	#ifdef LITEHTML_PERF
+		auto t_ri = clock::now();
+#endif
 
+#ifdef LITEHTML_PERF
 			auto us = [](auto a, auto b) { return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count(); };
 			fprintf(stderr,
 				"[litehtml-phases] html_parse=%lldµs  elements=%lldµs  master_css_parse=%lldµs  "
@@ -264,7 +291,8 @@ document::css_lru document::s_doc_css_lru;
 				doc->m_styles.selectors().size(),
 				doc->m_user_css.selectors().size()
 			);
-		}
+#endif
+		} // if(doc->m_root)
 
 		return doc;
 	}
@@ -473,11 +501,29 @@ document::css_lru document::s_doc_css_lru;
 			break;
 		case GUMBO_NODE_WHITESPACE:
 			{
-				string str = node->v.text.text;
-				for(size_t i = 0; i < str.length(); i++)
+				// The original code split every character into a separate el_space, which
+				// causes massive element explosion for indented HTML (e.g. "\n    " → 5 elements).
+				// For white-space:normal (the common case) all whitespace collapses to " " anyway,
+				// so the only character el_space needs to distinguish is '\n' (for is_break() in
+				// pre/pre-line/pre-wrap modes). We therefore split only on newlines:
+				//   "\n    "  → el_space("\n") + el_space("    ")   [2 elements]
+				//   "  "      → el_space("  ")                      [1 element]
+				//   "\n"      → el_space("\n")                      [1 element]
+				const char* p     = node->v.text.text;
+				const char* start = p;
+				while (*p)
 				{
-					elements.push_back(std::make_shared<el_space>(str.substr(i, 1).c_str(), shared_from_this()));
+					if (*p == '\n')
+					{
+						if (p > start)
+							elements.push_back(std::make_shared<el_space>(string(start, p - start).c_str(), shared_from_this()));
+						elements.push_back(std::make_shared<el_space>("\n", shared_from_this()));
+						start = p + 1;
+					}
+					++p;
 				}
+				if (p > start)
+					elements.push_back(std::make_shared<el_space>(start, shared_from_this()));
 			}
 			break;
 		default:
